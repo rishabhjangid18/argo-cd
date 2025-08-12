@@ -1,0 +1,74 @@
+
+trigger:
+  branches:
+    include:
+    - main
+  paths:
+    exclude:
+    - manifests/**
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  ACR_NAME: 'imageupdate'
+  ACR_LOGIN_SERVER: 'imageupdate.azurecr.io'
+  IMAGE_NAME: 'myimage'
+  IMAGE_TAG: '$(Build.BuildId)'
+
+stages:
+- stage: BuildPush
+  displayName: Build and Push Docker Image
+  jobs:
+  - job: BuildPushJob
+    displayName: Build and Push
+    steps:
+    - checkout: self
+
+    - task: Docker@2
+      displayName: Login to ACR
+      inputs:
+        command: login
+        containerRegistry: 'imageupdate-acr-service-connection'
+
+    - task: Docker@2
+      displayName: Build and Push
+      inputs:
+        repository: $(ACR_LOGIN_SERVER)/$(IMAGE_NAME)
+        command: buildAndPush
+        Dockerfile: Dockerfile
+        tags: |
+          $(IMAGE_TAG)
+
+
+- stage: UpdateManifest
+  displayName: Update Manifests and Commit
+  dependsOn: BuildPush
+  jobs:
+  - job: UpdateYamlJob
+    displayName: Update YAML and Commit
+    steps:
+    - checkout: self
+      persistCredentials: true
+      clean: true
+      fetchDepth: 0  # Ensures all refs are available
+
+    - script: |
+        echo "Updating deployment manifest with new tag: $(IMAGE_TAG)"
+        sed -i 's|image:.*|image: $(ACR_LOGIN_SERVER)/$(IMAGE_NAME):$(IMAGE_TAG)|' manifests/deployment.yaml
+
+        echo "Updated manifest:"
+        cat manifests/deployment.yaml
+      displayName: Update YAML with new tag
+
+    - script: |
+        git checkout main
+
+        git config user.name "Azure DevOps"
+        git config user.email "devops@mycompany.com"
+
+        git add manifests/deployment.yaml
+        git commit -m "Update deployment manifest with image tag $(IMAGE_TAG)"
+        git push origin main
+      displayName: Commit and Push to main
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
