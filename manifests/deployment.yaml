@@ -15,6 +15,6 @@ spec:
     spec:
       containers:
         - name: myapp
-          image: imageupdate.azurecr.io/myimage:56
+          image: imageupdate.azurecr.io/myimage:6
           ports:
             - containerPort: 8080
