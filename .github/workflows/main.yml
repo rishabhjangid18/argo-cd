@@ -1,0 +1,58 @@
+name: Build, Push, and Update Manifest
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'manifests/**'
+
+env:
+  ACR_NAME: imageupdate
+  ACR_LOGIN_SERVER: imageupdate.azurecr.io
+  IMAGE_NAME: myimage
+  IMAGE_TAG: ${{ github.run_number }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure CLI Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Log in to Azure Container Registry
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
+          docker push ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+  update-manifest:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Update deployment.yaml
+        run: |
+          echo "Updating deployment manifest with new tag: ${{ env.IMAGE_TAG }}"
+          sed -i "s|image:.*|image: ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}|" manifests/deployment.yaml
+          cat manifests/deployment.yaml
+
+      - name: Commit and Push changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add manifests/deployment.yaml
+          git commit -m "Update deployment manifest with image tag ${{ env.IMAGE_TAG }}"
+          git push origin main
